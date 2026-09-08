@@ -20,6 +20,9 @@ type RowData = { id: string; lineNumber: number; fields: Record<string, unknown>
 const isBlank = (v: unknown) =>
   v === undefined || v === null || (typeof v === "string" && v.trim() === "");
 
+/** A cell this page can write to: not system-owned, and still empty. */
+const isFillable = (field: Field, value: unknown) => !field.locked && isBlank(value);
+
 /** SharePoint returns dates as ISO; the date inputs want their own formats. */
 function forInput(value: unknown, type: FieldType): string {
   const s = String(value ?? "");
@@ -44,6 +47,30 @@ export default function RequestPage({ params }: { params: Promise<{ requestId: s
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "bad">("ok");
+
+  // "Only blanks" hides everything the requestor already filled, leaving just the cells
+  // this page can actually write to. The choice is remembered per browser.
+  //
+  // Read lazily rather than in an effect: the toggle is only rendered once the request has
+  // loaded client-side, so it never appears in the server-rendered HTML and can't mismatch
+  // on hydration. localStorage can throw outright in private mode, hence the try.
+  const [onlyBlanks, setOnlyBlanks] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("shipment.onlyBlanks") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleOnlyBlanks = (next: boolean) => {
+    setOnlyBlanks(next);
+    try {
+      localStorage.setItem("shipment.onlyBlanks", next ? "1" : "0");
+    } catch {
+      /* not worth failing the page over */
+    }
+  };
 
   // Never flips back to "loading" on a refresh — after a save the page stays put and the
   // saved cells simply turn read-only.
@@ -150,61 +177,100 @@ export default function RequestPage({ params }: { params: Promise<{ requestId: s
           </div>
         </header>
 
-        <p style={S.note}>
-          Grey cells were filled by the requestor and can&apos;t be changed here. Empty cells are yours to fill.
+        <div style={S.toolbar}>
+          <div style={S.segmented}>
+            <button type="button" onClick={() => toggleOnlyBlanks(false)}
+              style={{ ...S.segBtn, ...(onlyBlanks ? null : S.segBtnOn) }}>
+              All fields
+            </button>
+            <button type="button" onClick={() => toggleOnlyBlanks(true)}
+              style={{ ...S.segBtn, ...(onlyBlanks ? S.segBtnOn : null) }}>
+              Only blanks{blanksLeft ? ` (${blanksLeft})` : ""}
+            </button>
+          </div>
           {folder && (
-            <> · <a href={folder} target="_blank" rel="noopener noreferrer" style={S.link}>Open attachments</a></>
+            <a href={folder} target="_blank" rel="noopener noreferrer" style={S.link}>Open attachments</a>
           )}
+        </div>
+
+        <p style={S.note}>
+          {onlyBlanks
+            ? "Showing only the cells still waiting to be filled."
+            : "Grey cells were filled by the requestor and can’t be changed here. Empty cells are yours to fill."}
         </p>
 
         <div style={S.card}>
-          {sections.filter((s) => s.scope === "request").map((section) => (
-            <section key={section.title}>
-              <h2 style={S.h2}>{section.title}</h2>
-              <div style={{ ...S.grid2, marginTop: 12 }}>
-                {section.fields.map((f) => (
-                  <FieldBox
-                    key={f.name}
-                    field={f}
-                    value={head[f.name]}
-                    draft={reqEdits[f.name] ?? ""}
-                    onChange={(v) => setReqEdits({ ...reqEdits, [f.name]: v })}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
+          {onlyBlanks && blanksLeft === 0 && (
+            <p style={{ ...S.note, padding: "18px 0", textAlign: "center" }}>
+              Nothing left to fill on this request.
+            </p>
+          )}
 
-          {sections.filter((s) => s.scope === "item").map((section) => (
-            <section key={section.title}>
-              <h2 style={S.h2}>{section.title}s</h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
-                {rows.map((row) => (
-                  <div key={row.id} style={S.itemCard}>
-                    <span style={S.itemNum}>
-                      Line {row.lineNumber} · {String(row.fields.ItemDescription ?? "")}
-                    </span>
-                    <div style={S.grid2}>
-                      {section.fields.map((f) => (
-                        <FieldBox
-                          key={f.name}
-                          field={f}
-                          value={row.fields[f.name]}
-                          draft={itemEdits[row.id]?.[f.name] ?? ""}
-                          onChange={(v) =>
-                            setItemEdits({
-                              ...itemEdits,
-                              [row.id]: { ...(itemEdits[row.id] ?? {}), [f.name]: v },
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
+          {sections.filter((s) => s.scope === "request").map((section) => {
+            const fields = onlyBlanks
+              ? section.fields.filter((f) => isFillable(f, head[f.name]))
+              : section.fields;
+            if (!fields.length) return null;
+            return (
+              <section key={section.title}>
+                <h2 style={S.h2}>{section.title}</h2>
+                <div style={{ ...S.grid2, marginTop: 12 }}>
+                  {fields.map((f) => (
+                    <FieldBox
+                      key={f.name}
+                      field={f}
+                      value={head[f.name]}
+                      draft={reqEdits[f.name] ?? ""}
+                      onChange={(v) => setReqEdits({ ...reqEdits, [f.name]: v })}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+
+          {sections.filter((s) => s.scope === "item").map((section) => {
+            // A line only appears if it still has something to fill.
+            const visibleRows = onlyBlanks
+              ? rows.filter((r) => section.fields.some((f) => isFillable(f, r.fields[f.name])))
+              : rows;
+            if (!visibleRows.length) return null;
+            return (
+              <section key={section.title}>
+                <h2 style={S.h2}>{section.title}s</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+                  {visibleRows.map((row) => {
+                    const fields = onlyBlanks
+                      ? section.fields.filter((f) => isFillable(f, row.fields[f.name]))
+                      : section.fields;
+                    return (
+                      <div key={row.id} style={S.itemCard}>
+                        <span style={S.itemNum}>
+                          Line {row.lineNumber} · {String(row.fields.ItemDescription ?? "")}
+                        </span>
+                        <div style={S.grid2}>
+                          {fields.map((f) => (
+                            <FieldBox
+                              key={f.name}
+                              field={f}
+                              value={row.fields[f.name]}
+                              draft={itemEdits[row.id]?.[f.name] ?? ""}
+                              onChange={(v) =>
+                                setItemEdits({
+                                  ...itemEdits,
+                                  [row.id]: { ...(itemEdits[row.id] ?? {}), [f.name]: v },
+                                })
+                              }
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
 
           <div style={S.bar}>
             <button style={{ ...S.primaryBtn, opacity: saving || !editCount ? 0.55 : 1 }}
