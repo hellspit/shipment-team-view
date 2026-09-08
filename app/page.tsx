@@ -1,69 +1,162 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { S, pill, fmtValue, LABELS } from "@/app/ui";
+
+type RequestRow = {
+  requestId: string;
+  lineCount: number;
+  blanks: number;
+  fields: Record<string, string | number>;
+};
+
+const FILTERS = [
+  { key: "ShipmentStatus", label: "Shipment status" },
+  { key: "ApprovalStatus", label: "Approval" },
+  { key: "Priority", label: "Priority" },
+  { key: "Carrier", label: "Carrier" },
+] as const;
+
+export default function Dashboard() {
+  const [requests, setRequests] = useState<RequestRow[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState("");
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/requests");
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        setRequests(data.requests);
+        setColumns(data.columns);
+        setState("ready");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not load");
+        setState("error");
+      }
+    })();
+  }, []);
+
+  // Filter dropdowns are built from the values actually present, so they never offer a
+  // choice that would return nothing.
+  const options = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const f of FILTERS) {
+      const values = new Set<string>();
+      requests.forEach((r) => {
+        const v = String(r.fields[f.key] ?? "").trim();
+        if (v) values.add(v);
+      });
+      out[f.key] = [...values].sort();
+    }
+    return out;
+  }, [requests]);
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return requests.filter((r) => {
+      for (const [key, value] of Object.entries(picked)) {
+        if (value && String(r.fields[key] ?? "") !== value) return false;
+      }
+      if (!needle) return true;
+      return Object.values(r.fields).some((v) => String(v).toLowerCase().includes(needle));
+    });
+  }, [requests, q, picked]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main style={S.page}>
+      <div style={S.wrap}>
+        <header style={S.header}>
+          <div>
+            <h1 style={S.h1}>Shipment requests</h1>
+            <p style={S.sub}>
+              Select a request to open it and fill in the shipping details.
+            </p>
+          </div>
+          <span style={S.count}>
+            {state === "ready" ? `${shown.length} of ${requests.length}` : ""}
+          </span>
+        </header>
+
+        <div style={S.toolbar}>
+          <input
+            style={{ ...S.input, flex: "2 1 240px" }}
+            placeholder="Search id, requestor, customer, carrier…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          {FILTERS.map((f) => (
+            <select
+              key={f.key}
+              style={{ ...S.input, flex: "1 1 150px" }}
+              value={picked[f.key] ?? ""}
+              onChange={(e) => setPicked({ ...picked, [f.key]: e.target.value })}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              <option value="">{f.label}: all</option>
+              {options[f.key]?.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          ))}
+          {(q || Object.values(picked).some(Boolean)) && (
+            <button style={S.ghostBtn} onClick={() => { setQ(""); setPicked({}); }}>
+              Clear
+            </button>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+
+        {state === "loading" && <p style={S.note}>Loading requests…</p>}
+        {state === "error" && <p style={S.error}>{error}</p>}
+
+        {state === "ready" && (
+          <div style={S.tableWrap}>
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  {columns.map((c) => (
+                    <th key={c} style={S.th}>{LABELS[c] ?? c}</th>
+                  ))}
+                  <th style={S.th}>Items</th>
+                  <th style={S.th}>To fill</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((r) => (
+                  <tr key={r.requestId} style={S.tr}>
+                    {columns.map((c) => (
+                      <td key={c} style={S.td}>
+                        {c === "Title" ? (
+                          <Link href={`/request/${r.requestId}`} style={S.link}>
+                            {String(r.fields[c] ?? "")}
+                          </Link>
+                        ) : pill(c, String(r.fields[c] ?? "")) ?? fmtValue(c, r.fields[c])}
+                      </td>
+                    ))}
+                    <td style={S.td}>{r.lineCount}</td>
+                    <td style={S.td}>
+                      <span style={r.blanks ? S.blankTag : S.doneTag}>
+                        {r.blanks ? `${r.blanks} blank` : "complete"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {!shown.length && (
+                  <tr>
+                    <td style={{ ...S.td, textAlign: "center", color: "#6a6780" }} colSpan={columns.length + 2}>
+                      Nothing matches those filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
