@@ -216,3 +216,13 @@ export function isEmpty(value: unknown): boolean {
   if (typeof value === "string") return value.trim() === "";
   return false;
 }
+
+/** Minted by the intake form; the only request ids the API routes accept. */
+export const REQUEST_ID_RE = /^SHIP-\d{4}-\d{6}$/;
+
+/** Every row of one request, in line order. */
+export async function rowsFor(requestId: string): Promise<Row[]> {
+  const rows = (await fetchRows()).filter((r) => String(r.fields?.Title ?? "").trim() === requestId);
+  rows.sort((a, b) => Number(a.fields.LineNumber ?? 0) - Number(b.fields.LineNumber ?? 0));
+  return rows;
+}

@@ -3,6 +3,7 @@
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { S, pill, fmtValue } from "@/app/ui";
+import AddAttachment from "./AddAttachment";
 
 type FieldType = "text" | "multiline" | "choice" | "number" | "date" | "datetime" | "boolean";
 type Field = {
@@ -189,7 +190,10 @@ export default function RequestPage({ params }: { params: Promise<{ requestId: s
             </button>
           </div>
           {folder && (
-            <a href={folder} target="_blank" rel="noopener noreferrer" style={S.link}>Open attachments</a>
+            <>
+              <a href={folder} target="_blank" rel="noopener noreferrer" style={S.link}>Open attachments</a>
+              <AddAttachment requestId={requestId} onUploaded={load} />
+            </>
           )}
         </div>
 

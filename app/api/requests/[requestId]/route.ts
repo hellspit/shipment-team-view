@@ -11,19 +11,12 @@
 // in the UI — a stale browser tab can't overwrite something another person filled in first.
 
 import { graph, type GraphError } from "@/lib/graph";
-import { fetchRows, getSchema, listBase, isEmpty, type Row } from "@/lib/list";
+import { getSchema, listBase, isEmpty, rowsFor, REQUEST_ID_RE } from "@/lib/list";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const REQUEST_ID_RE = /^SHIP-\d{4}-\d{6}$/;
 const MAX_BODY_BYTES = 200_000;
-
-async function rowsFor(requestId: string): Promise<Row[]> {
-  const rows = (await fetchRows()).filter((r) => String(r.fields?.Title ?? "").trim() === requestId);
-  rows.sort((a, b) => Number(a.fields.LineNumber ?? 0) - Number(b.fields.LineNumber ?? 0));
-  return rows;
-}
 
 export async function GET(_request: Request, ctx: { params: Promise<{ requestId: string }> }) {
   const { requestId } = await ctx.params;
