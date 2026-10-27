@@ -1,9 +1,9 @@
 // Attachments for a shipment request.
 //
-// The intake form creates one folder per request — /Shipment Requests/SHIP-YYYY-NNNNNN in the
-// "Shipment Attachments" library — and stamps its link into AttachmentsFolderUrl on every row
-// of the request. We find the folder from that stored link instead of rebuilding its path, so
-// this app needs no library or folder settings of its own.
+// The intake form creates one folder per request — /Shipment Requests/<date> <sender> in the
+// "Shipment Attachments" library (SHIP-YYYY-NNNNNN for older requests) — and stamps its link
+// into AttachmentsFolderUrl on every row of the request. We find the folder from that stored
+// link instead of rebuilding its path, so this app needs no library settings of its own.
 //
 // As with the intake form, file bytes never pass through this server: the browser gets a
 // pre-authorized Graph upload URL per file and PUTs straight to SharePoint.
@@ -22,22 +22,42 @@ function shareId(url: string): string {
   return "u!" + Buffer.from(url).toString("base64").replace(/=+$/, "").replace(/\//g, "_").replace(/\+/g, "-");
 }
 
+/** The intake form's parent folder for every request folder. Same setting, same default. */
+function rootFolderName(): string {
+  return (process.env.SHAREPOINT_ROOT_FOLDER?.trim() || "Shipment Requests").replace(/^\/+|\/+$/g, "");
+}
+
 /**
- * The request's attachment folder, from the link on its list rows. The folder must be named
- * after the request — a row whose link was edited to point somewhere else is refused rather
- * than letting uploads land in another request's folder.
+ * The request's attachment folder, from the link on its list rows.
+ *
+ * Older requests' folders are named after the request id; newer ones are named
+ * "<date> <sender>". Either way the folder must sit directly in the requests root folder —
+ * a row whose link was edited to point somewhere else in the library is refused rather than
+ * letting uploads land there.
  */
 export async function resolveFolder(folderUrl: string, requestId: string): Promise<Folder> {
   const item = await graph<{
     id: string;
     name?: string;
     folder?: unknown;
-    parentReference?: { driveId?: string };
+    parentReference?: { driveId?: string; path?: string };
   }>(`/shares/${shareId(folderUrl)}/driveItem?$select=id,name,folder,parentReference`);
 
   const driveId = item.parentReference?.driveId;
   if (!item.folder || !driveId) throw new Error("The attachment link on this request doesn't point at a folder");
-  if (item.name !== requestId) throw new Error(`The attachment folder is "${item.name}", not ${requestId}`);
+  if (item.name === requestId) return { driveId, id: item.id };
+
+  // parentReference.path looks like "/drives/<id>/root:/Shipment Requests" (sometimes encoded).
+  let parent = item.parentReference?.path ?? "";
+  try {
+    parent = decodeURIComponent(parent);
+  } catch {
+    /* already plain */
+  }
+  const parentFolder = parent.split("root:")[1]?.replace(/^\/+|\/+$/g, "") ?? "";
+  if (parentFolder.toLowerCase() !== rootFolderName().toLowerCase() || item.name?.startsWith("_")) {
+    throw new Error(`The attachment link on ${requestId} points outside the "${rootFolderName()}" folder`);
+  }
   return { driveId, id: item.id };
 }
 
