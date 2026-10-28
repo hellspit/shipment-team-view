@@ -16,7 +16,7 @@ import { graph } from "@/lib/graph";
 export type Scope = "request" | "item";
 
 export const SECTIONS: { title: string; scope: Scope; columns: string[] }[] = [
-  { title: "Request", scope: "request", columns: ["Title", "SubmittedAt", "LineCount", "AttachmentCount", "AttachmentsFolderUrl"] },
+  { title: "Request", scope: "request", columns: ["Title", "SubmittedAt", "Requesttime", "LineCount", "AttachmentCount", "AttachmentsFolderUrl"] },
   { title: "Requestor", scope: "request", columns: ["RequestorName", "RequesterEmail", "Phone", "ProgramName", "BusinessJustification"] },
   { title: "Shipment", scope: "request", columns: ["ShipmentType", "Direction", "Purpose", "Priority", "RequestedShipDate", "RequiredDeliveryDate"] },
   { title: "References", scope: "request", columns: ["OrderNumber", "PONumber", "QuoteNumber"] },
@@ -34,7 +34,7 @@ export const SECTIONS: { title: string; scope: Scope; columns: string[] }[] = [
 
 /** Written by the intake form or by SharePoint itself — never editable here. */
 export const LOCKED = new Set([
-  "Title", "SubmissionId", "SubmittedAt", "LineNumber", "LineCount",
+  "Title", "SubmissionId", "SubmittedAt", "Requesttime", "LineNumber", "LineCount",
   "AttachmentCount", "AttachmentsFolderUrl",
 ]);
 
